@@ -12,27 +12,34 @@
 #define SENSOR_1 33
 #define SENSOR_2 15
 #define PACER_MAX 20000
+#define TIMEOUT_NO_CHECKIN_HOURS 1000
 
-// persistent current value of output characteristic
-static uint16_t numberOfSteps;
+#define MILLIS_HOUR 3600*1000
+
+// function prototypes
+unsigned long adjMillis(unsigned long millisSinceLastHour);
 
 // output characteristic to send output back to client
 BLECharacteristic *pOutputChar;
 
 // create encoder
 ESP32Encoder wheelEncoder;
+
 // set initial encoder position on program boot
-int encoderPosition = 0;
+int32_t encoderPosition = 0;
 
-// class InputReceivedCallbacks:
-//     public BLECharacteristicCallbacks {
+// accumulator for step diff over time
+uint16_t stepsOverTime[TIMEOUT_NO_CHECKIN_HOURS] = {};
 
-//         void onWrite(BLECharacteristic *pCharWriteState) {
+unsigned long hour = 0;
 
-//             pOutputChar->setValue(numberOfSteps);
-//             pOutputChar->notify();
-//     }
-// };
+unsigned long millisSinceLastHour = 0;
+
+// bias time forward by the milliseconds in an hour to prevent underflow when
+// calibrating time later
+unsigned long previousHourMillis = adjMillis(millisSinceLastHour);
+
+time_t currentTime = 0;
 
 // Class defines methods called when a device connects and disconnects from the service
 class ServerCallbacks: public BLEServerCallbacks {
@@ -42,6 +49,30 @@ class ServerCallbacks: public BLEServerCallbacks {
     void onDisconnect(BLEServer* pServer) {
         BLEDevice::startAdvertising();
         Serial.println("BLE Client Disconnected");
+    }
+};
+
+class InputReceivedCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharWriteState) {
+        uint8_t *inputValues = pCharWriteState->getData();
+        size_t dataSize = pCharWriteState->getLength();
+        Serial.print("Length of input data: ");
+        Serial.println(dataSize);
+
+        millisSinceLastHour = 0;
+        
+        int j = 0;
+        for (size_t i = dataSize; i > 0; i--)
+        {
+            unsigned long temp = (inputValues[i-1] << (8*(j++)));
+            Serial.print("Value = ");
+            Serial.println(inputValues[i-1]);
+            Serial.print("temp = ");
+            Serial.println(temp);
+            millisSinceLastHour += temp;
+        }
+
+        Serial.println(millisSinceLastHour);
     }
 };
 
@@ -56,6 +87,15 @@ void setup() {
                         CHARACTERISTIC_OUTPUT_UUID,
                         BLECharacteristic::PROPERTY_READ |
                         BLECharacteristic::PROPERTY_NOTIFY);
+
+    BLECharacteristic *pInputChar = pService->createCharacteristic(
+                        CHARACTERISTIC_INPUT_UUID,
+                        BLECharacteristic::PROPERTY_WRITE_NR | 
+                        BLECharacteristic::PROPERTY_WRITE);
+
+    // Hook callback to report server events
+    pServer->setCallbacks(new ServerCallbacks());
+    pInputChar->setCallbacks(new InputReceivedCallbacks());
 
     pService->start();
 
@@ -74,15 +114,28 @@ void setup() {
 
     ESP32Encoder::useInternalWeakPullResistors=UP;
 
-    wheelEncoder.attachFullQuad(SENSOR_1, SENSOR_2);
+    wheelEncoder.attachSingleEdge(SENSOR_1, SENSOR_2);
+    
 }
 
 void loop() {
     static int pacer = 0;
-    int newPosition = wheelEncoder.getCount();
+
+    int32_t newPosition = wheelEncoder.getCount();
     if (newPosition != encoderPosition) {
         Serial.printf("Encoder position = %02d\r\n", newPosition);
         encoderPosition = newPosition;
+
+        unsigned long currentMillis = adjMillis(millisSinceLastHour);
+
+        if (currentMillis >= previousHourMillis + MILLIS_HOUR) {
+            hour++;
+            previousHourMillis = currentMillis;
+        }  
+
+        Serial.printf("Current time (ms) = %02ld\r\n", currentMillis);
+        Serial.printf("Current time (s) = %02ld\r\n", currentMillis/1000);
+        Serial.printf("Current hour = %02d\r\n", hour);
     }
 
     if (pacer++ > PACER_MAX) {
@@ -93,4 +146,10 @@ void loop() {
         pOutputChar->setValue(encoderPosition);
         pOutputChar->notify();
     }
+}
+
+unsigned long adjMillis(unsigned long millisSinceLastHour) {
+    // take current time, add one hour's worth of ms to prevent underflow and then
+    // calibrate by the number of milliseconds since the last hour 
+    return millis() + MILLIS_HOUR - millisSinceLastHour;
 }
