@@ -60,7 +60,7 @@ class InputReceivedCallbacks: public BLECharacteristicCallbacks {
         Serial.println(dataSize);
 
         millisSinceLastHour = 0;
-        
+
         int j = 0;
         for (size_t i = dataSize; i > 0; i--)
         {
@@ -115,6 +115,9 @@ void setup() {
     ESP32Encoder::useInternalWeakPullResistors=UP;
 
     wheelEncoder.attachSingleEdge(SENSOR_1, SENSOR_2);
+
+    Serial.print("Current time: ");
+    Serial.println(previousHourMillis);
     
 }
 
@@ -129,13 +132,29 @@ void loop() {
         unsigned long currentMillis = adjMillis(millisSinceLastHour);
 
         if (currentMillis >= previousHourMillis + MILLIS_HOUR) {
-            hour++;
+            Serial.println("More than one hour elapsed");
+            Serial.print("Previous hour ms: ");
+            Serial.println(previousHourMillis);
+            Serial.print("Current ms: ");
+            Serial.println(currentMillis);
+
+            unsigned long diff = currentMillis - previousHourMillis;
+
+            Serial.print("Difference: ");
+            Serial.println(diff);
+
+            unsigned long elapsed = diff / MILLIS_HOUR;
+
+            Serial.print("Hours elapsed: ");
+            Serial.println(elapsed);
+
+            hour += elapsed;
             previousHourMillis = currentMillis;
         }  
 
-        Serial.printf("Current time (ms) = %02ld\r\n", currentMillis);
-        Serial.printf("Current time (s) = %02ld\r\n", currentMillis/1000);
-        Serial.printf("Current hour = %02d\r\n", hour);
+        Serial.printf("Current time (ms) = %ld\r\n", currentMillis);
+        Serial.printf("Current time (s) = %ld\r\n", (currentMillis)/1000);
+        Serial.printf("Current hour = %d\r\n", hour);
     }
 
     if (pacer++ > PACER_MAX) {
@@ -151,5 +170,21 @@ void loop() {
 unsigned long adjMillis(unsigned long millisSinceLastHour) {
     // take current time, add one hour's worth of ms to prevent underflow and then
     // calibrate by the number of milliseconds since the last hour 
-    return millis() + MILLIS_HOUR - millisSinceLastHour;
+    unsigned long timeNow = millis();
+    unsigned long timeAdjusted = 0;
+    unsigned long timeRemainder = millisSinceLastHour % MILLIS_HOUR;
+
+    if (timeNow > timeRemainder) {
+        timeAdjusted = timeNow - timeRemainder;
+    } else {
+        timeAdjusted = timeNow + MILLIS_HOUR - timeRemainder;
+    }
+
+    Serial.println("Fetching current time");
+    Serial.print("System time: ");
+    Serial.println(timeNow);
+
+    Serial.print("Adjusted time: ");
+    Serial.println(timeAdjusted);
+    return timeAdjusted;
 }
