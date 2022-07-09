@@ -15,10 +15,10 @@
 #define LED_PACER_MAX 50
 #define TIMEOUT_NO_CHECKIN_UNITS 10000
 
-//#define UNIT_MINUTES 1
-//#define MILLIS_UNIT (UNIT_MINUTES*60*1000) // 1 unit currently initialised to 1 hour
+#define UNIT_MINUTES 5
+#define MILLIS_UNIT (UNIT_MINUTES*60*1000) // 1 unit currently initialised to 1 hour
 
-#define MILLIS_UNIT (60*1000/10) // debug 6 second hour for rapid testing 
+//#define MILLIS_UNIT (60*1000/10) // debug 6 second hour for rapid testing 
 
 // output characteristic to send output back to client
 BLECharacteristic *pOutputChar;
