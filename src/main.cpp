@@ -11,16 +11,21 @@
 
 #define SENSOR_1 33
 #define SENSOR_2 15
-#define PACER_MAX 20000
-#define TIMEOUT_NO_CHECKIN_HOURS 1000
+#define PACER_MAX 1000
+#define LED_PACER_MAX 50
+#define TIMEOUT_NO_CHECKIN_UNITS 10000
 
-#define MILLIS_HOUR 3600*1000
+//#define UNIT_MINUTES 1
+//#define MILLIS_UNIT (UNIT_MINUTES*60*1000) // 1 unit currently initialised to 1 hour
 
-// function prototypes
-unsigned long adjMillis(unsigned long millisSinceLastHour);
+#define MILLIS_UNIT (60*1000/10) // debug 6 second hour for rapid testing 
 
 // output characteristic to send output back to client
 BLECharacteristic *pOutputChar;
+
+bool overrideSend = false;
+bool connected = false;
+bool prevConnected = connected;
 
 // create encoder
 ESP32Encoder wheelEncoder;
@@ -28,27 +33,35 @@ ESP32Encoder wheelEncoder;
 // set initial encoder position on program boot
 int32_t encoderPosition = 0;
 
+uint32_t stepCountCode = 0xFFFFFFFF;
+uint32_t hourlyDataCode = 0xFFFFFFFE;
+
 // accumulator for step diff over time
-uint16_t stepsOverTime[TIMEOUT_NO_CHECKIN_HOURS] = {};
+// should be a circular buffer in future
+int stepsOverTime[TIMEOUT_NO_CHECKIN_UNITS] = { 0 };
 
-unsigned long hour = 0;
+// variable for holding the current number of steps
+uint16_t stepsThisUnit = 0;
 
-unsigned long millisSinceLastHour = 0;
+unsigned long unit = 0;
+unsigned long sentUnit = 0;
 
-// bias time forward by the milliseconds in an hour to prevent underflow when
-// calibrating time later
-unsigned long previousHourMillis = adjMillis(millisSinceLastHour);
+unsigned long prevStepsThisUnit = 0;
 
-time_t currentTime = 0;
+unsigned long millisToNextUnit = MILLIS_UNIT; // assume we start exactly on a unit
+unsigned long nextUnit = millisToNextUnit;
 
 // Class defines methods called when a device connects and disconnects from the service
 class ServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
         Serial.println("BLE Client Connected");
+        overrideSend = true;
+        connected = true;
     }
     void onDisconnect(BLEServer* pServer) {
         BLEDevice::startAdvertising();
         Serial.println("BLE Client Disconnected");
+        connected = false;
     }
 };
 
@@ -59,20 +72,20 @@ class InputReceivedCallbacks: public BLECharacteristicCallbacks {
         Serial.print("Length of input data: ");
         Serial.println(dataSize);
 
-        millisSinceLastHour = 0;
+        millisToNextUnit = 0;
 
         int j = 0;
         for (size_t i = dataSize; i > 0; i--)
         {
             unsigned long temp = (inputValues[i-1] << (8*(j++)));
-            Serial.print("Value = ");
-            Serial.println(inputValues[i-1]);
-            Serial.print("temp = ");
-            Serial.println(temp);
-            millisSinceLastHour += temp;
+            millisToNextUnit += temp;
         }
+        Serial.print("ms to next Unit: ");
+        Serial.println(millisToNextUnit);
 
-        Serial.println(millisSinceLastHour);
+        nextUnit = millis() + millisToNextUnit;
+        Serial.print("next Unit: ");
+        Serial.println(nextUnit);
     }
 };
 
@@ -117,74 +130,86 @@ void setup() {
     wheelEncoder.attachSingleEdge(SENSOR_1, SENSOR_2);
 
     Serial.print("Current time: ");
-    Serial.println(previousHourMillis);
+    Serial.println(millis());
     
 }
 
 void loop() {
     static int pacer = 0;
+    static int ledPacer = 0;
 
     int32_t newPosition = wheelEncoder.getCount();
     if (newPosition != encoderPosition) {
-        Serial.printf("Encoder position = %02d\r\n", newPosition);
+        Serial.printf("Encoder position = %d\r\n", newPosition);
         encoderPosition = newPosition;
 
-        unsigned long currentMillis = adjMillis(millisSinceLastHour);
+        stepsThisUnit++;
 
-        if (currentMillis >= previousHourMillis + MILLIS_HOUR) {
-            Serial.println("More than one hour elapsed");
-            Serial.print("Previous hour ms: ");
-            Serial.println(previousHourMillis);
-            Serial.print("Current ms: ");
-            Serial.println(currentMillis);
+        unsigned long currentMillis = millis();
 
-            unsigned long diff = currentMillis - previousHourMillis;
+        // iterate to next unit
+        if (currentMillis >= nextUnit) {
+            unsigned long late = currentMillis - nextUnit;
+            Serial.print("ms late: ");
+            Serial.println(late);
 
-            Serial.print("Difference: ");
-            Serial.println(diff);
+            nextUnit = currentMillis + MILLIS_UNIT - (late % MILLIS_UNIT);
+            Serial.print("next Unit: ");
+            Serial.println(nextUnit);
 
-            unsigned long elapsed = diff / MILLIS_HOUR;
+            stepsOverTime[unit] = stepsThisUnit;
 
-            Serial.print("Hours elapsed: ");
-            Serial.println(elapsed);
+            stepsThisUnit = 0;
 
-            hour += elapsed;
-            previousHourMillis = currentMillis;
+            unit += (late / MILLIS_UNIT) + 1;
         }  
 
         Serial.printf("Current time (ms) = %ld\r\n", currentMillis);
         Serial.printf("Current time (s) = %ld\r\n", (currentMillis)/1000);
-        Serial.printf("Current hour = %d\r\n", hour);
+        Serial.printf("Current Unit = %d\r\n", unit);
     }
 
     if (pacer++ > PACER_MAX) {
         pacer = 0;
 
-        digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
+        if (!connected) {
+            if(ledPacer++ > LED_PACER_MAX) {
+                // seperate LED pacer to slow down blinking while allowing BT transmit speed to increased
+                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // LED blinks when not connected
+                ledPacer = 0;
+            }
+        } else {
+            if (connected != prevConnected) { // i.e. app has just connected
+                delay(1000); // second delay to allow app BLE to get its shit together before sending
+            }
+            digitalWrite(LED_BUILTIN, HIGH); // set LED to solid when connected
 
-        pOutputChar->setValue(encoderPosition);
-        pOutputChar->notify();
+            if (unit > sentUnit) {
+                Serial.println("new unit, sending through data for this unit");
+                Serial.print("steps this unit: ");
+                Serial.println(stepsOverTime[sentUnit]);
+                int stepsForUnit = -stepsOverTime[sentUnit];
+                
+                // zeros are sent as -65535 so logic still works
+                if (stepsForUnit == 0) {
+                    stepsForUnit = -65535;
+                }
+
+                Serial.print("sending steps for this unit as: ");
+                Serial.println(stepsForUnit);
+                pOutputChar->setValue(stepsForUnit);
+                pOutputChar->notify();
+                sentUnit++;
+            }
+            
+            if (prevStepsThisUnit != stepsThisUnit) {
+                Serial.print("sending step data for this unit: ");
+                Serial.println(stepsThisUnit);
+                pOutputChar->setValue(stepsThisUnit);
+                pOutputChar->notify();
+                prevStepsThisUnit = stepsThisUnit;
+            }
+        }
+        prevConnected = connected;
     }
-}
-
-unsigned long adjMillis(unsigned long millisSinceLastHour) {
-    // take current time, add one hour's worth of ms to prevent underflow and then
-    // calibrate by the number of milliseconds since the last hour 
-    unsigned long timeNow = millis();
-    unsigned long timeAdjusted = 0;
-    unsigned long timeRemainder = millisSinceLastHour % MILLIS_HOUR;
-
-    if (timeNow > timeRemainder) {
-        timeAdjusted = timeNow - timeRemainder;
-    } else {
-        timeAdjusted = timeNow + MILLIS_HOUR - timeRemainder;
-    }
-
-    Serial.println("Fetching current time");
-    Serial.print("System time: ");
-    Serial.println(timeNow);
-
-    Serial.print("Adjusted time: ");
-    Serial.println(timeAdjusted);
-    return timeAdjusted;
 }
