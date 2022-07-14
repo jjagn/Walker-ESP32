@@ -15,10 +15,24 @@
 #define LED_PACER_MAX 50
 #define TIMEOUT_NO_CHECKIN_UNITS 10000
 
-#define UNIT_MINUTES 5
-#define MILLIS_UNIT (UNIT_MINUTES*60*1000) // 1 unit currently initialised to 1 hour
+// variable for setting whether
+#define DEBUG
 
-//#define MILLIS_UNIT (60*1000/10) // debug 6 second hour for rapid testing 
+#ifdef DEBUG
+    // defines for generating random steps for debug
+    #define RANDOM_STEP_RANGE 100
+    #define RANDOM_STEP_START 0
+
+    // debug 6 second hour for rapid testing 
+    #define MILLIS_UNIT (60*1000/10) 
+#else
+    // 1 unit currently initialised to 5 minutes
+    #define UNIT_MINUTES 5
+    #define MILLIS_UNIT (UNIT_MINUTES*60*1000) 
+
+    #define RANDOM_STEP_RANGE 1
+    #define RANDOM_STEP_START 0
+#endif
 
 // output characteristic to send output back to client
 BLECharacteristic *pOutputChar;
@@ -144,33 +158,36 @@ void loop() {
         encoderPosition = newPosition;
 
         stepsThisUnit++;
-
-        unsigned long currentMillis = millis();
-
-        // iterate to next unit
-        if (currentMillis >= nextUnit) {
-            unsigned long late = currentMillis - nextUnit;
-            Serial.print("ms late: ");
-            Serial.println(late);
-
-            nextUnit = currentMillis + MILLIS_UNIT - (late % MILLIS_UNIT);
-            Serial.print("next Unit: ");
-            Serial.println(nextUnit);
-
-            stepsOverTime[unit] = stepsThisUnit;
-
-            stepsThisUnit = 0;
-
-            unit += (late / MILLIS_UNIT) + 1;
-        }  
-
-        Serial.printf("Current time (ms) = %ld\r\n", currentMillis);
-        Serial.printf("Current time (s) = %ld\r\n", (currentMillis)/1000);
-        Serial.printf("Current Unit = %d\r\n", unit);
     }
 
     if (pacer++ > PACER_MAX) {
         pacer = 0;
+
+        unsigned long currentMillis = millis();
+
+        // iterate to next unit if appropriate
+            if (currentMillis >= nextUnit) {
+                unsigned long late = currentMillis - nextUnit;
+                Serial.print("ms late: ");
+                Serial.println(late);
+
+                nextUnit = currentMillis + MILLIS_UNIT - (late % MILLIS_UNIT);
+                Serial.print("next Unit: ");
+                Serial.println(nextUnit);
+                
+                // not sure if this is yucky or not
+                #ifdef DEBUG
+                    int random = rand() % RANDOM_STEP_RANGE + RANDOM_STEP_START;
+                    stepsThisUnit += random;
+                #else
+                #endif
+
+                stepsOverTime[unit] = stepsThisUnit;
+
+                stepsThisUnit = 0;
+
+                unit += (late / MILLIS_UNIT) + 1;
+            }  
 
         if (!connected) {
             if(ledPacer++ > LED_PACER_MAX) {
@@ -183,6 +200,10 @@ void loop() {
                 delay(1000); // second delay to allow app BLE to get its shit together before sending
             }
             digitalWrite(LED_BUILTIN, HIGH); // set LED to solid when connected
+
+            // Serial.printf("Current time (ms) = %ld\r\n", currentMillis);
+            // Serial.printf("Current time (s) = %ld\r\n", (currentMillis)/1000);
+            // Serial.printf("Current Unit = %d\r\n", unit);
 
             if (unit > sentUnit) {
                 Serial.println("new unit, sending through data for this unit");
