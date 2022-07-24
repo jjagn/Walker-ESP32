@@ -9,14 +9,14 @@
 #define CHARACTERISTIC_OUTPUT_UUID "ED01FEB8-A2A6-45F0-A70D-3B328414514C"
 #define CHARACTERISTIC_INPUT_UUID "7104D9CC-83C8-422C-97FE-C353C7B9D322"
 
-#define SENSOR_1 33
-#define SENSOR_2 15
+#define SENSOR_1 12
+#define SENSOR_2 27
 #define PACER_MAX 1000
 #define LED_PACER_MAX 50
 #define TIMEOUT_NO_CHECKIN_UNITS 10000
 
 // variable for setting whether
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
     // defines for generating random steps for debug
@@ -29,9 +29,6 @@
     // 1 unit currently initialised to 5 minutes
     #define UNIT_MINUTES 5
     #define MILLIS_UNIT (UNIT_MINUTES*60*1000) 
-
-    #define RANDOM_STEP_RANGE 1
-    #define RANDOM_STEP_START 0
 #endif
 
 // output characteristic to send output back to client
@@ -211,7 +208,7 @@ void loop() {
                 Serial.println(stepsOverTime[sentUnit]);
                 int stepsForUnit = -stepsOverTime[sentUnit];
                 
-                // zeros are sent as -65535 so logic still works
+                // zeros are sent as -65535 to allow distinguishing between '0 steps for the sent hour' and '0 steps right now'
                 if (stepsForUnit == 0) {
                     stepsForUnit = -65535;
                 }
