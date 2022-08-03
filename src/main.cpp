@@ -16,7 +16,7 @@
 #define TIMEOUT_NO_CHECKIN_UNITS 10000
 
 // variable for setting whether
-// #define DEBUG
+#define DEBUG
 
 #ifdef DEBUG
     // defines for generating random steps for debug
@@ -65,13 +65,13 @@ unsigned long nextUnit = millisToNextUnit;
 // Class defines methods called when a device connects and disconnects from the service
 class ServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
-        Serial.println("BLE Client Connected");
+        // Serial.println("BLE Client Connected");
         overrideSend = true;
         connected = true;
     }
     void onDisconnect(BLEServer* pServer) {
         BLEDevice::startAdvertising();
-        Serial.println("BLE Client Disconnected");
+        // Serial.println("BLE Client Disconnected");
         connected = false;
     }
 };
@@ -80,8 +80,8 @@ class InputReceivedCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharWriteState) {
         uint8_t *inputValues = pCharWriteState->getData();
         size_t dataSize = pCharWriteState->getLength();
-        Serial.print("Length of input data: ");
-        Serial.println(dataSize);
+        // Serial.print("Length of input data: ");
+        // Serial.println(dataSize);
 
         millisToNextUnit = 0;
 
@@ -91,18 +91,19 @@ class InputReceivedCallbacks: public BLECharacteristicCallbacks {
             unsigned long temp = (inputValues[i-1] << (8*(j++)));
             millisToNextUnit += temp;
         }
-        Serial.print("ms to next Unit: ");
-        Serial.println(millisToNextUnit);
+        // Serial.print("ms to next Unit: ");
+        // Serial.println(millisToNextUnit);
 
         nextUnit = millis() + millisToNextUnit;
-        Serial.print("next Unit: ");
-        Serial.println(nextUnit);
+        // Serial.print("next Unit: ");
+        // Serial.println(nextUnit);
     }
 };
 
 void setup() {
-    Serial.begin(115200);
-
+    // Serial.begin(115200);
+    setCpuFrequencyMhz(10);
+    
     BLEDevice::init(PERIPHERAL_NAME);
     BLEServer *pServer = BLEDevice::createServer();
     BLEService *pService = pServer->createService(SERVICE_UUID);
@@ -132,7 +133,7 @@ void setup() {
     pAdvertising->setMinPreferred(0x12);
 
     BLEDevice::startAdvertising();
-    Serial.println("BLE Service Advertising");
+    // Serial.println("BLE Service Advertising");
 
     pinMode(LED_BUILTIN, OUTPUT);
 
@@ -140,9 +141,8 @@ void setup() {
 
     wheelEncoder.attachSingleEdge(SENSOR_1, SENSOR_2);
 
-    Serial.print("Current time: ");
-    Serial.println(millis());
-    
+    // Serial.print("Current time: ");
+    // Serial.println(millis());
 }
 
 void loop() {
@@ -151,7 +151,7 @@ void loop() {
 
     int32_t newPosition = wheelEncoder.getCount();
     if (newPosition != encoderPosition) {
-        Serial.printf("Encoder position = %d\r\n", newPosition);
+        // Serial.printf("Encoder position = %d\r\n", newPosition);
         encoderPosition = newPosition;
 
         stepsThisUnit++;
@@ -165,12 +165,12 @@ void loop() {
         // iterate to next unit if appropriate
             if (currentMillis >= nextUnit) {
                 unsigned long late = currentMillis - nextUnit;
-                Serial.print("ms late: ");
-                Serial.println(late);
+                // Serial.print("ms late: ");
+                // Serial.println(late);
 
                 nextUnit = currentMillis + MILLIS_UNIT - (late % MILLIS_UNIT);
-                Serial.print("next Unit: ");
-                Serial.println(nextUnit);
+                // Serial.print("next Unit: ");
+                // Serial.println(nextUnit);
                 
                 // not sure if this is yucky or not
                 #ifdef DEBUG
@@ -189,7 +189,7 @@ void loop() {
         if (!connected) {
             if(ledPacer++ > LED_PACER_MAX) {
                 // seperate LED pacer to slow down blinking while allowing BT transmit speed to increased
-                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // LED blinks when not connected
+                // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // LED blinks when not connected
                 ledPacer = 0;
             }
         } else {
@@ -203,9 +203,9 @@ void loop() {
             // Serial.printf("Current Unit = %d\r\n", unit);
 
             if (unit > sentUnit) {
-                Serial.println("new unit, sending through data for this unit");
-                Serial.print("steps this unit: ");
-                Serial.println(stepsOverTime[sentUnit]);
+                // Serial.println("new unit, sending through data for this unit");
+                // Serial.print("steps this unit: ");
+                // Serial.println(stepsOverTime[sentUnit]);
                 int stepsForUnit = -stepsOverTime[sentUnit];
                 
                 // zeros are sent as -65535 to allow distinguishing between '0 steps for the sent hour' and '0 steps right now'
@@ -213,16 +213,16 @@ void loop() {
                     stepsForUnit = -65535;
                 }
 
-                Serial.print("sending steps for this unit as: ");
-                Serial.println(stepsForUnit);
+                // Serial.print("sending steps for this unit as: ");
+                // Serial.println(stepsForUnit);
                 pOutputChar->setValue(stepsForUnit);
                 pOutputChar->notify();
                 sentUnit++;
             }
             
             if (prevStepsThisUnit != stepsThisUnit) {
-                Serial.print("sending step data for this unit: ");
-                Serial.println(stepsThisUnit);
+                // Serial.print("sending step data for this unit: ");
+                // Serial.println(stepsThisUnit);
                 pOutputChar->setValue(stepsThisUnit);
                 pOutputChar->notify();
                 prevStepsThisUnit = stepsThisUnit;
