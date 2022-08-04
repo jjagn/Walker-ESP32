@@ -29,7 +29,7 @@
 #else
     // 1 unit currently initialised to 5 minutes
     #define UNIT_MINUTES 5
-    #define MILLIS_UNIT (UNIT_MINUTES*60*1000/50) 
+    #define MILLIS_UNIT (UNIT_MINUTES*60*1000) 
 #endif
 
 // output characteristic to send output back to client
@@ -104,7 +104,7 @@ class InputReceivedCallbacks: public BLECharacteristicCallbacks {
 void setup() {
     // setCpuFrequencyMhz(40);
     esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0); // wakeup on encoder event
-    esp_sleep_enable_timer_wakeup(MILLIS_UNIT * 1000 / 2); // wake up twice per unit
+    // esp_sleep_enable_timer_wakeup(MILLIS_UNIT * 1000 / 2); // wake up twice per unit
     Serial.begin(115200);
 
     BLEDevice::init(PERIPHERAL_NAME);
