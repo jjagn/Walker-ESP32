@@ -14,9 +14,10 @@
 #define PACER_MAX 1000
 #define LED_PACER_MAX 50
 #define TIMEOUT_NO_CHECKIN_UNITS 10000
+#define SLEEP_PACER_MAX 2000
 
 // variable for setting whether
-#define DEBUG
+// #define DEBUG
 
 #ifdef DEBUG
     // defines for generating random steps for debug
@@ -28,7 +29,7 @@
 #else
     // 1 unit currently initialised to 5 minutes
     #define UNIT_MINUTES 5
-    #define MILLIS_UNIT (UNIT_MINUTES*60*1000) 
+    #define MILLIS_UNIT (UNIT_MINUTES*60*1000/50) 
 #endif
 
 // output characteristic to send output back to client
@@ -101,9 +102,11 @@ class InputReceivedCallbacks: public BLECharacteristicCallbacks {
 };
 
 void setup() {
-    // Serial.begin(115200);
-    setCpuFrequencyMhz(10);
-    
+    // setCpuFrequencyMhz(40);
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_12, 0); // wakeup on encoder event
+    esp_sleep_enable_timer_wakeup(MILLIS_UNIT * 1000 / 2); // wake up twice per unit
+    Serial.begin(115200);
+
     BLEDevice::init(PERIPHERAL_NAME);
     BLEServer *pServer = BLEDevice::createServer();
     BLEService *pService = pServer->createService(SERVICE_UUID);
@@ -141,36 +144,45 @@ void setup() {
 
     wheelEncoder.attachSingleEdge(SENSOR_1, SENSOR_2);
 
-    // Serial.print("Current time: ");
-    // Serial.println(millis());
+    Serial.print("Current time: ");
+    Serial.println(millis());
 }
 
 void loop() {
     static int pacer = 0;
     static int ledPacer = 0;
+    static int sleepPacer = 0;
 
     int32_t newPosition = wheelEncoder.getCount();
     if (newPosition != encoderPosition) {
-        // Serial.printf("Encoder position = %d\r\n", newPosition);
+        Serial.printf("Encoder position = %d\r\n", newPosition);
         encoderPosition = newPosition;
 
         stepsThisUnit++;
+        sleepPacer = 0;
     }
 
     if (pacer++ > PACER_MAX) {
         pacer = 0;
+
+        if (sleepPacer++ > SLEEP_PACER_MAX) {
+            Serial.println("going to sleep");
+            digitalWrite(LED_BUILTIN, LOW); // turn off LED in sleep mode
+            esp_light_sleep_start();
+            Serial.println("waking up");
+        }
 
         unsigned long currentMillis = millis();
 
         // iterate to next unit if appropriate
             if (currentMillis >= nextUnit) {
                 unsigned long late = currentMillis - nextUnit;
-                // Serial.print("ms late: ");
-                // Serial.println(late);
+                Serial.print("ms late: ");
+                Serial.println(late);
 
                 nextUnit = currentMillis + MILLIS_UNIT - (late % MILLIS_UNIT);
-                // Serial.print("next Unit: ");
-                // Serial.println(nextUnit);
+                Serial.print("next Unit: ");
+                Serial.println(nextUnit);
                 
                 // not sure if this is yucky or not
                 #ifdef DEBUG
@@ -189,10 +201,11 @@ void loop() {
         if (!connected) {
             if(ledPacer++ > LED_PACER_MAX) {
                 // seperate LED pacer to slow down blinking while allowing BT transmit speed to increased
-                // digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // LED blinks when not connected
+                digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN)); // LED blinks when not connected
                 ledPacer = 0;
             }
         } else {
+            sleepPacer = 0;
             if (connected != prevConnected) { // i.e. app has just connected
                 delay(1000); // second delay to allow app BLE to get its shit together before sending
             }
